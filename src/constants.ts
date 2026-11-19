@@ -67,10 +67,25 @@ export const SPIN_WEDGES = [
 
 // Leaderboards (leaderboard.ts; client plaza.js boards): the saved doc fields ranked (Rebirth,
 // Wins, Power, Playtime), rows per board and how often the lists are re-read and re-sent.
-export const LEADERBOARD_STATS = ["rebirths", "trophies", "energy", "playtime"] as const;
+export const LEADERBOARD_STATS = ["bestOdds", "catches", "income"] as const;
 export type LeaderboardStat = (typeof LEADERBOARD_STATS)[number];
 export const LEADERBOARD_SIZE = 10;
+// Friend invites: most invited friends counted on one account (the client caps the boost lower).
+export const INVITES_MAX = 1000;
 export const LEADERBOARD_EVERY_MS = 60 * 1000;
+
+// Bloxity's hosted leaderboards (reporter.ts): the boards the client declares with
+// Legion.SDK.leaderboard.define (client config.js LEADERBOARDS: same ids, max 10, permanent once
+// created) and which saved field feeds each (the plaza boards use the same stats). The server
+// reports the scores of Bloxity-verified accounts.
+export const LEADERBOARDS = [
+  { id: "best-pull", label: "Best pull (1 in N)", stat: "bestOdds", order: "desc", mode: "best", format: "compact", reset: "none" },
+  { id: "baddies-caught", label: "Baddies caught", stat: "catches", order: "desc", mode: "best", format: "number", reset: "none" },
+  { id: "money-per-second", label: "Money per second", stat: "income", order: "desc", mode: "best", format: "compact", reset: "none" },
+] as const;
+export const LEADERBOARD_REPORT_EVERY_MS = 15 * 1000; // docs: batch every 10-30 s
+export const REPORT_BATCH_MAX = 200; // scores per report call
+export const SCORE_MAX = Number.MAX_SAFE_INTEGER;
 
 // Ids from the client's catalogs (boats, engines incl. `ladder-N`, partners, trails, pet kinds,
 // potions): camelCase slugs, so nothing odd is stored.

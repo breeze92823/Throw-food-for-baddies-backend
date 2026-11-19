@@ -26,6 +26,7 @@ export interface GameSave {
   pad: { cash: number; xp: number };
   train: { level: number; xp: number; reps: number };
   chestAt: number;
+  income: number; // money per second when saved (the income board)
   adBoostUntil: number; // epoch ms the rewarded-ad income boost ends
   luckyCredits: number; // free Lucky Throws from rewarded ads
   stats: { throws: number; catches: number; fused: number; bestOdds: number; earned: number };
@@ -104,6 +105,7 @@ export function sanitizeGame(raw: unknown): GameSave | null {
     pad: { cash: num(pad.cash, CURRENCY_MAX), xp: num(pad.xp, CURRENCY_MAX) },
     train: { level: int(train.level, GAME_LIMITS.level, 1), xp: num(train.xp, CURRENCY_MAX), reps: int(train.reps, 1e12) },
     chestAt: num(raw.chestAt, GAME_LIMITS.epochMs),
+    income: num(raw.income, CURRENCY_MAX),
     adBoostUntil: num(raw.adBoostUntil, GAME_LIMITS.epochMs),
     luckyCredits: int(raw.luckyCredits, GAME_LIMITS.luckyCredits),
     stats: {

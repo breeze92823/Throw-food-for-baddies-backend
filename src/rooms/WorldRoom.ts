@@ -1,8 +1,10 @@
 import { Room, Client, CloseCode } from "colyseus";
 import { WorldState, PlayerState } from "./schema/WorldState.js";
-import { GAME_SLUG, BASE_COUNT, DISTANCE_MAX, GUEST_ID_PREFIX, LEADERBOARD_EVERY_MS, NAME_MAX, PFP_MAX_LEN, RECONNECT_SECONDS, ROOM_MAX_CLIENTS } from "../constants.js";
+import { INVITES_MAX, GAME_SLUG, BASE_COUNT, DISTANCE_MAX, GUEST_ID_PREFIX, LEADERBOARD_EVERY_MS, NAME_MAX, PFP_MAX_LEN, RECONNECT_SECONDS, ROOM_MAX_CLIENTS } from "../constants.js";
 import { pickBase } from "../bases.js";
 import { sanitizeGame } from "../game.js";
+import { resolveIdentity } from "../auth.js";
+import { reportProgress } from "../reporter.js";
 import { AD_PLACEMENT_PATTERN, verifyAdReward, verifyBase } from "../ads.js";
 import { getPlayers, type PlayerDoc } from "../db.js";
 import { sanitizeProgress } from "../sanitize.js";
@@ -88,9 +90,14 @@ export class WorldRoom extends Room<{ state: WorldState }> {
       try {
         await players.updateOne(
           { _id: userId },
-          { $set: { game, username: p.username || "Player", updatedAt: new Date() }, $setOnInsert: { version: 1 } },
+          {
+            // The plaza / Bloxity boards rank these (copied out of the save so they can be indexed).
+            $set: { game, bestOdds: game.stats.bestOdds, catches: game.stats.catches, income: game.income, username: p.username || "Player", updatedAt: new Date() },
+            $setOnInsert: { version: 1 },
+          },
           { upsert: true },
         );
+        if (this.verified.has(client.sessionId)) reportProgress(userId, { bestOdds: game.stats.bestOdds, catches: game.stats.catches, income: game.income });
       } catch (err) {
         console.warn("[WorldRoom] saveGame failed", err);
       }
@@ -183,12 +190,17 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     },
     // Re-states identity after a login/logout that happens AFTER join (a guest who signs in
     // mid-session). The server answers with progress/noProgress for the new identity.
-    identify: (client: Client, msg: { username?: string; userId?: string; pfp?: string }) => {
+    identify: async (client: Client, msg: { token?: string; username?: string; userId?: string; pfp?: string; ref?: string }) => {
       const p = this.state.players.get(client.sessionId);
       if (!p) return;
-      if (typeof msg?.username === "string") p.username = sanitizeName(msg.username);
-      if (typeof msg?.pfp === "string") p.pfp = sanitizePfp(msg.pfp);
-      if (typeof msg?.userId === "string") this.setUserId(client, p, msg.userId);
+      // The account comes from the Bloxity token (auth.ts), never from a user id the client sends.
+      const id = await resolveIdentity(msg);
+      if (this.state.players.get(client.sessionId) !== p) return; // left meanwhile
+      p.username = id.username || (typeof msg?.username === "string" ? sanitizeName(msg.username) : p.username);
+      p.pfp = id.pfp || (typeof msg?.pfp === "string" ? sanitizePfp(msg.pfp) : p.pfp);
+      this.setVerified(client.sessionId, id.verified);
+      this.setRef(client.sessionId, msg?.ref);
+      this.setUserId(client, p, id.userId);
     },
   };
 
@@ -212,7 +224,7 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     }
   }
 
-  onJoin(client: Client, options?: { username?: string; userId?: string; pfp?: string; base?: number; pose?: unknown; loadout?: unknown; avatar?: string }) {
+  async onJoin(client: Client, options?: { ref?: string; token?: string; username?: string; userId?: string; pfp?: string; base?: number; pose?: unknown; loadout?: unknown; avatar?: string }) {
     const p = new PlayerState();
     // One base per player: the lowest free one, or the one a rejoining player asks for (`options.base`)
     // when it is still free. Bases are freed in forgetSession, so a seat held for a reconnection
@@ -230,7 +242,55 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.state.players.set(client.sessionId, p);
     // Tell the newcomer their base straight away (the roster carries it for everyone else).
     client.send("welcome", { base: p.base, bases: BASE_COUNT });
-    this.setUserId(client, p, typeof options?.userId === "string" ? options.userId : "");
+    // Who this really is: the Bloxity token is verified with Bloxity (auth.ts); a user id the client
+    // sends is only believed in local development. Everything above ran synchronously, so the
+    // base is already taken while this waits.
+    const id = await resolveIdentity(options);
+    if (this.state.players.get(client.sessionId) !== p) return; // left while verifying
+    if (id.username) p.username = id.username;
+    if (id.pfp) p.pfp = id.pfp;
+    this.setVerified(client.sessionId, id.verified);
+    this.setRef(client.sessionId, options?.ref);
+    this.setUserId(client, p, id.userId);
+  }
+
+  // Sessions whose account Bloxity verified: only these appear on Bloxity's leaderboards.
+  // sessionId -> the account whose invite link opened the game (`?ref=`), kept for verified players only.
+  private refs = new Map<string, string>();
+  private setRef(sessionId: string, raw: unknown) {
+    if (typeof raw === "string" && raw && raw.length <= 128 && this.verified.has(sessionId)) this.refs.set(sessionId, raw);
+    else this.refs.delete(sessionId);
+  }
+
+  // Friend invite: a Bloxity-verified player who is NEW to the game and opened it through someone's
+  // invite link (`?ref=<inviter's account id>`) counts once for that inviter (their `invites`), which
+  // gives the inviter an income boost. The invitee's document is created first with `invitedBy`
+  // (an upsert that only inserts), so each account can only ever be credited once, and the inviter
+  // must already exist (no upsert) and cannot be the invitee.
+  private async creditInvite(inviteeId: string, ref: string): Promise<void> {
+    const players = getPlayers();
+    if (!players || !ref || ref === inviteeId) return;
+    try {
+      const made = await players.updateOne({ _id: inviteeId }, { $setOnInsert: { invitedBy: ref, version: 1, updatedAt: new Date() } }, { upsert: true });
+      if (!made.upsertedCount) return; // already known: not a new player
+      const inc = await players.updateOne({ _id: ref }, { $inc: { invites: 1 } });
+      if (!inc.matchedCount) return; // no such inviter
+      // The inviter, if they are in this room, hears about it at once (others get it on their next load).
+      for (const [sid, uid] of this.userIds) {
+        if (uid !== ref) continue;
+        const doc = await players.findOne({ _id: ref });
+        const c = this.clients.find((x) => x.sessionId === sid);
+        if (c) c.send("invites", { invites: Math.min(INVITES_MAX, Number(doc?.invites) || 0) });
+      }
+    } catch (err) {
+      console.warn("[WorldRoom] creditInvite failed", err);
+    }
+  }
+
+  private verified = new Set<string>();
+  private setVerified(sessionId: string, on: boolean) {
+    if (on) this.verified.add(sessionId);
+    else this.verified.delete(sessionId);
   }
 
   // A deliberate `room.leave()` closes with CONSENTED -- drop the player at once. Anything
@@ -267,6 +327,8 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.userIds.delete(sessionId);
     this.identified.delete(sessionId);
     this.loaded.delete(sessionId);
+    this.verified.delete(sessionId);
+    this.refs.delete(sessionId);
     this.dailies.delete(sessionId);
     this.spinStates.delete(sessionId);
   }
@@ -374,7 +436,11 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     const now = Date.now();
     const spin = spinStateFrom(doc, now);
     this.spinStates.set(client.sessionId, spin);
-    client.send("game", { game: doc?.game ?? null, serverTime: now });
+    const sid = client.sessionId;
+    const ref = this.refs.get(sid);
+    if (!doc && userId && players && ref && this.verified.has(sid)) await this.creditInvite(userId, ref);
+    if (this.state.players.get(client.sessionId) !== p) return; // left while the invite was credited
+    client.send("game", { game: doc?.game ?? null, invites: Math.min(INVITES_MAX, Number(doc?.invites) || 0), serverTime: now });
     if (!doc) client.send("noProgress", { serverTime: now });
     else client.send("progress", { ...(sanitizeProgress(doc) ?? {}), serverTime: now });
     client.send("spins", this.spinView(spin, now));
