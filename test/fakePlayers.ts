@@ -42,11 +42,12 @@ export function fakePlayers(seed: PlayerDoc[] = []) {
     },
     async updateOne(filter: { _id: string }, update: any, options: any) {
       const existing = docs.get(filter._id);
-      if (!existing && !options?.upsert) return { modifiedCount: 0 };
+      if (!existing && !options?.upsert) return { matchedCount: 0, modifiedCount: 0, upsertedCount: 0 };
       const next: any = { ...(existing ?? { _id: filter._id, ...(update.$setOnInsert ?? {}) }), ...(update.$set ?? {}) };
       for (const [k, v] of Object.entries(update.$max ?? {})) next[k] = Math.max(next[k] ?? -Infinity, v as number);
+      for (const [k, v] of Object.entries(update.$inc ?? {})) next[k] = (next[k] ?? 0) + (v as number);
       docs.set(filter._id, next);
-      return { modifiedCount: 1 };
+      return { matchedCount: existing ? 1 : 0, modifiedCount: 1, upsertedCount: existing ? 0 : 1 };
     },
   };
   return fake as unknown as Collection<PlayerDoc> & { docs: Map<string, PlayerDoc>; gate: Promise<void>; release: () => void };
