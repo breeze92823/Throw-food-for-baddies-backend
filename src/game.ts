@@ -24,7 +24,7 @@ export interface GameSave {
   quests: Record<string, true>;
   seen: string[]; // Index entries the player has looked at (the NEW tags)
   pad: { cash: number; xp: number };
-  train: { level: number; xp: number; reps: number };
+  train: { level: number; xp: number; reps: number; bench: number }; // bench = Training Bench tier (0-based)
   chestAt: number;
   income: number; // money per second when saved (the income board)
   adBoostUntil: number; // epoch ms the rewarded-ad income boost ends
@@ -38,6 +38,7 @@ export const GAME_LIMITS = {
   hotbar: 32,
   level: 1e6,
   luckyCredits: 99,
+  benchTier: 63, // Training Bench tiers (client TRAINING.benches)
   epochMs: 8.64e15, // the largest valid JS Date
 };
 
@@ -103,7 +104,7 @@ export function sanitizeGame(raw: unknown): GameSave | null {
     quests: idFlags(raw.quests, 256),
     seen: idList(raw.seen, GAME_LIMITS.ids),
     pad: { cash: num(pad.cash, CURRENCY_MAX), xp: num(pad.xp, CURRENCY_MAX) },
-    train: { level: int(train.level, GAME_LIMITS.level, 1), xp: num(train.xp, CURRENCY_MAX), reps: int(train.reps, 1e12) },
+    train: { level: int(train.level, GAME_LIMITS.level, 1), xp: num(train.xp, CURRENCY_MAX), reps: int(train.reps, 1e12), bench: int(train.bench, GAME_LIMITS.benchTier) },
     chestAt: num(raw.chestAt, GAME_LIMITS.epochMs),
     income: num(raw.income, CURRENCY_MAX),
     adBoostUntil: num(raw.adBoostUntil, GAME_LIMITS.epochMs),
