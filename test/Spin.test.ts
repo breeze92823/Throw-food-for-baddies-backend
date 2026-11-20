@@ -35,8 +35,8 @@ describe("spin wheel", () => {
 
   it("rolls wedges by weight", () => {
     assert.strictEqual(rollWedge(0).id, SPIN_WEDGES[0].id);
-    assert.strictEqual(rollWedge(0.9999999).id, "hugePet");
-    assert.strictEqual(rollWedge(0.36).id, "wins50");
+    assert.strictEqual(rollWedge(0.9999999).id, "jackpot");
+    assert.strictEqual(rollWedge(0.31).id, "luck"); // weights 30 / 22 / ...: 31% lands in the second wedge
   });
 
   it("spends a spin, rolls the prize on the server and saves the count", async () => {

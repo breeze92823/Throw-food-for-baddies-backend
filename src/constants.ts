@@ -58,12 +58,20 @@ export const SPINS_MAX = 1e6;
 // The wedges' prizes and odds (weights in %). Ids match the client's SPIN.wedges; the client
 // decides what each prize is, the server only which one is won.
 export const SPIN_WEDGES = [
-  { id: "doubleWins", weight: 35 },
-  { id: "wins50", weight: 25 },
-  { id: "luck", weight: 35 },
-  { id: "wins250", weight: 4.9 },
-  { id: "hugePet", weight: 0.1 },
+  { id: "cash1", weight: 30 },
+  { id: "luck", weight: 22 },
+  { id: "cash5", weight: 20 },
+  { id: "lucky", weight: 15 },
+  { id: "income", weight: 12 },
+  { id: "jackpot", weight: 1 },
 ] as const;
+
+// The Hungry Giant (boss.ts; client EVENTS.boss in config.js, keep in step): she visits at these
+// minutes past every UTC hour for BOSS_LENGTH_MIN minutes; the room's throws fill her, she needs
+// BOSS_NEED_PER_PLAYER per player in the room when she arrives.
+export const BOSS_AT_MIN = [20, 50];
+export const BOSS_LENGTH_MIN = 4;
+export const BOSS_NEED_PER_PLAYER = 8;
 
 // Leaderboards (leaderboard.ts; client plaza.js boards): the saved doc fields ranked (Rebirth,
 // Wins, Power, Playtime), rows per board and how often the lists are re-read and re-sent.

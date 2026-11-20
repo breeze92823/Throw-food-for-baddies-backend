@@ -51,7 +51,9 @@ export function applyPen(p: PlayerState, msg: unknown): void {
     if (out.length >= PEN_MAX) break;
     const id = (e as { id?: unknown })?.id;
     const size = (e as { size?: unknown })?.size;
-    if (isId(id) && Number.isInteger(size) && (size as number) >= 0 && (size as number) <= 9) out.push(`${id}:${size}`);
+    const v = (e as { v?: unknown })?.v; // variant (client VARIANTS), 0 = plain
+    const vs = Number.isInteger(v) && (v as number) > 0 && (v as number) <= 9 ? `:${v}` : "";
+    if (isId(id) && Number.isInteger(size) && (size as number) >= 0 && (size as number) <= 9) out.push(`${id}:${size}${vs}`);
   }
   p.pen = out.join(",");
 }

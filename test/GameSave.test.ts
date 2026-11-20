@@ -41,6 +41,34 @@ describe("game save", () => {
     assert.ok(!("hacked" in g) && !("evil" in g.stats));
   });
 
+  it("keeps variants, season areas, tickets, potions, records and titles, bounded", () => {
+    const g = sanitizeGame({
+      baddies: [{ uid: 1, id: "candy_gumdrop", size: 0, v: 2, a: 5 }, { uid: 2, id: "meadow_daisy", size: 1, v: 99 }, { uid: 3, id: "meadow_daisy", size: 0, v: 0 }],
+      hotbar: [{ id: "meadow_honey", size: 0, v: 1 }],
+      tickets: 1e99,
+      lures: 2,
+      potions: { luck: 123, "bad id": 5, cash: -4 },
+      recordPaid: 3,
+      indexPaid: [0, 0, 3, -1, 999, "x"],
+      titles: ["Sunny Meadow Master", "", 5, "x".repeat(200)],
+      stats: { bestDist: 312.5, bestStreak: 4, bestVariant: 3, bestRarity: 5, bestArea: 11 },
+    })!;
+    assert.deepStrictEqual(g.baddies, [
+      { uid: 1, id: "candy_gumdrop", size: 0, v: 2, a: 5 },
+      { uid: 2, id: "meadow_daisy", size: 1, v: 9 },
+      { uid: 3, id: "meadow_daisy", size: 0 },
+    ]);
+    assert.deepStrictEqual(g.hotbar, [{ id: "meadow_honey", size: 0, v: 1 }]);
+    assert.strictEqual(g.tickets, 1e12);
+    assert.strictEqual(g.lures, 2);
+    assert.deepStrictEqual(g.potions, { luck: 123, cash: 0 });
+    assert.deepStrictEqual(g.indexPaid, [0, 3]);
+    assert.deepStrictEqual(g.titles, ["Sunny Meadow Master"]);
+    assert.deepStrictEqual([g.stats.bestDist, g.stats.bestStreak, g.stats.bestVariant, g.stats.bestRarity, g.stats.bestArea], [312.5, 4, 3, 5, 11]);
+    const fresh = sanitizeGame({})!;
+    assert.deepStrictEqual([fresh.stats.bestRarity, fresh.stats.bestArea], [-1, -1], "nothing caught / reached yet");
+  });
+
   it("sends a saved player their game and stores what they send back, never for a guest", async () => {
     const saved = sanitizeGame({ money: 1234, foods: ["apple"], food: "apple", baddies: [{ uid: 1, id: "meadow_honey", size: 0 }] });
     const fake = fakePlayers([{ _id: "u1", game: saved!, version: 1, updatedAt: new Date() }]);

@@ -10,6 +10,7 @@ import { getPlayers, type PlayerDoc } from "../db.js";
 import { sanitizeProgress } from "../sanitize.js";
 import { accrue, rollWedge, spinStateFrom, type SpinState } from "../spin.js";
 import { claimDaily, dailyFields, dailyView, readDaily, rollDaily, type DailyState } from "../daily.js";
+import { bossView, bossWindow, feedBoss, newBoss, type BossState } from "../boss.js";
 import { applyAvatar, applyLoadout, applyPen, applyPose, cleanEmote, cleanThrow } from "../presence.js";
 import { ranksOf, topBoards } from "../leaderboard.js";
 
@@ -177,7 +178,15 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     // A throw, replayed by the others: the food's flight down the lane (presence.ts cleanThrow).
     throw: (client: Client, msg: unknown) => {
       const e = cleanThrow(msg);
-      if (e && this.state.players.has(client.sessionId)) this.broadcast("throwFx", { sid: client.sessionId, ...e }, { except: client });
+      if (!e || !this.state.players.has(client.sessionId)) return;
+      this.broadcast("throwFx", { sid: client.sessionId, ...e }, { except: client });
+      // The Hungry Giant (boss.ts): every throw while she is here feeds her.
+      this.tickBoss(Date.now());
+      if (this.boss && this.bossOn) {
+        const full = feedBoss(this.boss, client.sessionId);
+        this.broadcast("boss", bossView(this.boss, true));
+        if (full) this.broadcast("bossWin", { key: this.boss.key, throws: Object.fromEntries(this.boss.throws) });
+      }
     },
     // A Bloxity emote the sender started ("" = stopped), replayed on their avatar by the others.
     emote: (client: Client, msg: unknown) => {
@@ -210,6 +219,23 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.clock.setInterval(() => {
       for (const c of this.clients) void this.sendLeaderboard(c);
     }, LEADERBOARD_EVERY_MS);
+    this.clock.setInterval(() => this.tickBoss(Date.now()), 1000);
+  }
+
+  // The Hungry Giant's visit (boss.ts): starts and ends on the UTC clock; `boss` goes to everyone
+  // when she arrives or leaves (and after every bite, see the `throw` handler).
+  boss: BossState | null = null;
+  bossOn = false;
+  tickBoss(now: number) {
+    const w = bossWindow(now);
+    if (w && this.boss?.key !== w.key) {
+      this.boss = newBoss(w.key, w.endsAt, this.clients.length);
+      this.bossOn = true;
+      this.broadcast("boss", bossView(this.boss, true));
+    } else if (!w && this.bossOn) {
+      this.bossOn = false;
+      this.broadcast("boss", bossView(this.boss, false));
+    }
   }
 
   // `leaderboard` { boards: { rebirths|trophies|energy|playtime: [{ name, value }] }, ranks: { stat: n | null } }.
@@ -242,6 +268,9 @@ export class WorldRoom extends Room<{ state: WorldState }> {
     this.state.players.set(client.sessionId, p);
     // Tell the newcomer their base straight away (the roster carries it for everyone else).
     client.send("welcome", { base: p.base, bases: BASE_COUNT });
+    // And whether the Hungry Giant is here right now.
+    this.tickBoss(Date.now());
+    if (this.bossOn) client.send("boss", bossView(this.boss, true));
     // Who this really is: the Bloxity token is verified with Bloxity (auth.ts); a user id the client
     // sends is only believed in local development. Everything above ran synchronously, so the
     // base is already taken while this waits.
